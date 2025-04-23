@@ -1,0 +1,13 @@
+[project]
+name = "dumplings_opt"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "deap>=1.4.2",
+    "matplotlib>=3.10.1",
+    "networkx>=3.4.2",
+    "pandas>=2.2.3",
+    "pulp>=3.1.1",
+]
