@@ -1,2 +1,2 @@
 from .model import DumplingsModel
-from .data import DumplingsDataBasic, DumplingsMap, DumplingSolutionBasic
+from .data import DumplingsDataBasic, DumplingsMap, DumplingsSolutionBasic

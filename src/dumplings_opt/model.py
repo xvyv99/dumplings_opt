@@ -1,5 +1,5 @@
 import time
-import pulp
+import pulp as pl
 from pulp import LpVariable, LpProblem, LpMaximize, lpSum, LpBinary
 from typing import List, Tuple
 
@@ -8,7 +8,7 @@ import numpy as np
 
 import networkx as nx
 
-from .data import DumplingsDataBasic, DumplingSolutionBasic
+from .data import DumplingsDataBasic, DumplingsSolutionBasic
 
 class DumplingsModel:
     dumplings_data: DumplingsDataBasic
@@ -60,8 +60,8 @@ class DumplingsModel:
         pass
         
     def solve(self):
-        self.lp_prob.solve(pulp.PULP_CBC_CMD(msg=False))
-        return DumplingSolutionBasic(self.dumplings_data, *self.get_var_np())
+        self.lp_prob.solve()
+        return DumplingsSolutionBasic(self.dumplings_data, *self.get_var_np())
 
     def get_var_np(self) -> Tuple[npt.NDArray[np.uint8], npt.NDArray[np.uint8]]:
         I_num = self.dumplings_data.customer_num
@@ -83,53 +83,10 @@ class DumplingsModel:
     
     def print_status(self):
         truck_ratio, customer_ratio = self.stat()
-        print("Linear Programming Status: ", pulp.LpStatus[self.lp_prob.status])
+        print("Linear Programming Status: ", pl.LpStatus[self.lp_prob.status])
         print("Truck Setup Ratio: ", truck_ratio)
         print("Customer Served Ratio: ",customer_ratio)
-        print("Object Value:", pulp.value(self.lp_prob.objective))
-    
-    def display_connection(self):
-        G = nx.DiGraph()
+        print("Object Value:", pl.value(self.lp_prob.objective))
 
-        truck_selection, custom2truck_selection = self.get_var_np()
-        
-        assert np.sum(truck_selection)>0, 'There is no truck!'
-        
-        truck_nodes = [('T'+str(ind), {'type': 'T'}) for ind in range(self.dumplings_data.truck_possible_num)]
-        customer_nodes = [('C'+str(ind), {'type': 'C'}) for ind in range(self.dumplings_data.customer_num)]
-
-        G.add_nodes_from(truck_nodes + customer_nodes)
-        
-        correspond_truck_id = [np.where(row == 1)[0] for row in custom2truck_selection]
-
-        # Consider the situation that customer do not fully served(Like data in day 1).
-        customers_id: List[np.uint64] = []
-        trucks_id: List[np.uint64] = []
-        
-        for ind, x in enumerate(correspond_truck_id):
-            # assert x.size>0, f'Customter {ind} have not be served!'
-            if x.size>0:
-                customers_id.append(ind)
-                trucks_id.append(x[0])
-
-        edge_lst = [('C'+str(customer_id), 'T'+str(truck_id)) for customer_id, truck_id in zip(customers_id, trucks_id)]
-        G.add_edges_from(edge_lst)
-
-        G_no_isolates = G.copy()
-        G_no_isolates.remove_nodes_from(list(nx.isolates(G_no_isolates)))
-
-        color_map = {
-            "T": "gray",
-            "C": "skyblue",
-        }
-
-        node_colors = [color_map[G_no_isolates.nodes[node]["type"]] for node in G_no_isolates.nodes()]
-        
-        pos = nx.spring_layout(G_no_isolates, k=1, iterations=256, seed=42)
-        
-        nx.draw_networkx_nodes(G_no_isolates, pos, node_color=node_colors, node_shape='s', node_size=700, edgecolors='black')
-        nx.draw_networkx_edges(G_no_isolates, pos, width=1.5, alpha=0.7)
-        nx.draw_networkx_labels(G_no_isolates, pos)
-
-class LpModel(DumplingsModel):
+class DumplingsModelAdv:
     pass

@@ -67,14 +67,25 @@ class DumplingsDataBasic:
         return res
 
 class DumplingsMap(DumplingsDataBasic):
+    days: np.uint64 # Opt day count
+    te: np.uint64 # travel_expense
+
     customer_names: List[str]
     truck_names: List[str]
     
     truck_possible_location: npt.NDArray[np.float64]
     customer_location: npt.NDArray[np.float64]
 
-    def __init__(self, customer_num: np.uint64, truck_num: np.uint64):
+    def __init__(self, 
+        customer_num: np.uint64, # TODO: variable customer number with constant customer possible number
+        truck_num: np.uint64,
+        days: np.uint64 = 1,
+        travel_expense: np.uint64|None = None
+    ):
         super().__init__(customer_num, truck_num)
+        self.days = days
+        if not travel_expense:
+            self.te = int(self.f / 2)
     
     @staticmethod
     def generate_preference_matrix() -> npt.NDArray[np.float64]:
@@ -146,7 +157,7 @@ class DumplingsMap(DumplingsDataBasic):
         plt.scatter(self.customer_location[:,0], self.customer_location[:,1], color='blue')
         plt.scatter(self.truck_possible_location[:,0], self.truck_possible_location[:,1], color='red')
 
-class DumplingSolutionBasic:
+class DumplingsSolutionBasic:
     dumplings_data: DumplingsDataBasic
     truck_selection: npt.NDArray[np.uint8]
     customer2truck_selection: npt.NDArray[np.uint8]
@@ -193,7 +204,7 @@ class DumplingSolutionBasic:
             x_np[x] = 1
         for i, j in enumerate(demand_choice):
             y_np[i, j] = 1
-        res_sol = DumplingSolutionBasic(data, x_np, y_np)
+        res_sol = DumplingsSolutionBasic(data, x_np, y_np)
         return res_sol
     
     def display_connection(self):
@@ -233,8 +244,13 @@ class DumplingSolutionBasic:
 
         node_colors = [color_map[G_no_isolates.nodes[node]["type"]] for node in G_no_isolates.nodes()]
         
-        pos = nx.spring_layout(G_no_isolates, k=1, iterations=256, seed=42)
-        
+        # pos = nx.spring_layout(G_no_isolates, k=1, iterations=256, seed=42)
+        pos = nx.spring_layout(G_no_isolates, 
+            k=1.5,  
+            iterations=256, 
+            weight=None
+        )   
+
         nx.draw_networkx_nodes(G_no_isolates, pos, node_color=node_colors, node_shape='s', node_size=700, edgecolors='black')
         nx.draw_networkx_edges(G_no_isolates, pos, width=1.5, alpha=0.7)
         nx.draw_networkx_labels(G_no_isolates, pos)
