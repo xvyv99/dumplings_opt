@@ -1,15 +1,14 @@
 import time
 import pulp
-from pulp import LpVariable, LpProblem, LpMaximize, lpSum, GLPK, LpBinary
-from typing import Tuple
+from pulp import LpVariable, LpProblem, LpMaximize, lpSum, LpBinary
+from typing import List, Tuple
 
 import numpy.typing as npt
 import numpy as np
-import matplotlib.pyplot as plt
 
 import networkx as nx
 
-from .data import DumplingsDataBasic
+from .data import DumplingsDataBasic, DumplingSolutionBasic
 
 class DumplingsModel:
     dumplings_data: DumplingsDataBasic
@@ -17,6 +16,8 @@ class DumplingsModel:
     lp_prob: LpProblem
     lp_var_x: dict
     lp_var_y: dict
+
+    soluton_demand_choice: npt.NDArray[np.uint64]
     
     def __init__(self, data: DumplingsDataBasic):
         self.dumplings_data = data
@@ -55,11 +56,12 @@ class DumplingsModel:
         self.lp_var_x = lp_var_x
         self.lp_var_y = lp_var_y
 
-    def solve_bf(self):
+    def solve_ga(self):
         pass
         
     def solve(self):
-        return self.lp_prob.solve(pulp.PULP_CBC_CMD(msg=False))
+        self.lp_prob.solve(pulp.PULP_CBC_CMD(msg=False))
+        return DumplingSolutionBasic(self.dumplings_data, *self.get_var_np())
 
     def get_var_np(self) -> Tuple[npt.NDArray[np.uint8], npt.NDArray[np.uint8]]:
         I_num = self.dumplings_data.customer_num
@@ -89,20 +91,28 @@ class DumplingsModel:
     def display_connection(self):
         G = nx.DiGraph()
 
-        x_np, connection_mat = self.get_var_np()
+        truck_selection, custom2truck_selection = self.get_var_np()
         
-        if np.sum(x_np)==0:
-            print('There is no truck!')
-            return 
+        assert np.sum(truck_selection)>0, 'There is no truck!'
         
         truck_nodes = [('T'+str(ind), {'type': 'T'}) for ind in range(self.dumplings_data.truck_possible_num)]
         customer_nodes = [('C'+str(ind), {'type': 'C'}) for ind in range(self.dumplings_data.customer_num)]
 
         G.add_nodes_from(truck_nodes + customer_nodes)
         
-        correspond_truck_id = [np.where(row == 1)[0] for row in connection_mat]
+        correspond_truck_id = [np.where(row == 1)[0] for row in custom2truck_selection]
 
-        edge_lst = [('C'+str(customer_id), 'T'+str(truck_id[0])) for customer_id, truck_id in enumerate(correspond_truck_id)]
+        # Consider the situation that customer do not fully served(Like data in day 1).
+        customers_id: List[np.uint64] = []
+        trucks_id: List[np.uint64] = []
+        
+        for ind, x in enumerate(correspond_truck_id):
+            # assert x.size>0, f'Customter {ind} have not be served!'
+            if x.size>0:
+                customers_id.append(ind)
+                trucks_id.append(x[0])
+
+        edge_lst = [('C'+str(customer_id), 'T'+str(truck_id)) for customer_id, truck_id in zip(customers_id, trucks_id)]
         G.add_edges_from(edge_lst)
 
         G_no_isolates = G.copy()
@@ -120,3 +130,6 @@ class DumplingsModel:
         nx.draw_networkx_nodes(G_no_isolates, pos, node_color=node_colors, node_shape='s', node_size=700, edgecolors='black')
         nx.draw_networkx_edges(G_no_isolates, pos, width=1.5, alpha=0.7)
         nx.draw_networkx_labels(G_no_isolates, pos)
+
+class LpModel(DumplingsModel):
+    pass

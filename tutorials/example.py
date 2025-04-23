@@ -1,10 +1,12 @@
 from dumplings_opt import DumplingsModel, DumplingsDataBasic, DumplingsMap
 import matplotlib.pyplot as plt
 
-data_b1 = DumplingsDataBasic(5, 10)
+data_b1 = DumplingsMap.from_official(1, 'tutorials/basic_model_data')
+data_b1.print_info()
+
 model_b1 = DumplingsModel(data_b1)
-model_b1.solve()
+sol = model_b1.solve()
 model_b1.print_status()
-model_b1.display_connection()
+sol.display_connection()
 
 plt.show()

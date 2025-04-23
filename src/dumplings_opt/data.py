@@ -1,8 +1,12 @@
 from typing import Tuple, Literal, List
 import matplotlib.pyplot as plt
+
 import numpy as np
 import pandas as pd
+
 import numpy.typing as npt
+import networkx as nx
+
 from pathlib import Path
 
 class DumplingsDataBasic:    
@@ -39,24 +43,6 @@ class DumplingsDataBasic:
         print(f"- r value (upper bound): {self.r}")
         print(f"- k value (lower bound): {self.k}")
         print(f"- f value (fixed cost): {self.f}")
-
-    def eval(self, demand_choice: npt.NDArray[np.uint64]) -> np.float64:
-        # `demand_choice` should like [1, 3, 4, 2, 4, ...], which index correspond to customer, value correspond to truck id.
-        assert demand_choice.shape == (self.customer_num, ), f"Invaild shape {demand_choice}!"
-        assert np.all(demand_choice < self.truck_possible_num), "Value should less than truck id!"
-        truck_id = np.unique(demand_choice)
-
-        I_num = self.customer_num
-        J_num = self.truck_possible_num
-
-        lp_var_x_np = np.zeros(J_num, dtype=np.uint8)
-        lp_var_y_np = np.zeros((I_num, J_num), dtype=np.uint8)
-
-        for x in truck_id:
-            lp_var_x_np[x] = 1
-        for i, j in enumerate(demand_choice):
-            lp_var_y_np[i, j] = 1
-        return self.calc(lp_var_x_np, lp_var_y_np)
     
     def calc(self, x_np: npt.NDArray[np.uint8], y_np: npt.NDArray[np.uint8]) -> np.float64:
         I_num = self.customer_num
@@ -136,9 +122,9 @@ class DumplingsMap(DumplingsDataBasic):
         res_map.customer_num = customer_num
         res_map.truck_possible_num = truck_possible_num
         
-        res_map.r = df_problem_set.iloc[0, 0]
-        res_map.f = df_problem_set.iloc[0, 1]
-        res_map.k = df_problem_set.iloc[0, 2]
+        res_map.r = df_problem_set.iloc[0]['burrito_price']
+        res_map.k = df_problem_set.iloc[0]['ingredient_cost']
+        res_map.f = df_problem_set.iloc[0]['truck_cost']
 
         res_map.customer_names = df_customer.loc[:, 'index'].to_list()
         res_map.truck_names = df_truck.loc[:, 'index'].to_list()
@@ -159,3 +145,96 @@ class DumplingsMap(DumplingsDataBasic):
     def draw_location(self):
         plt.scatter(self.customer_location[:,0], self.customer_location[:,1], color='blue')
         plt.scatter(self.truck_possible_location[:,0], self.truck_possible_location[:,1], color='red')
+
+class DumplingSolutionBasic:
+    dumplings_data: DumplingsDataBasic
+    truck_selection: npt.NDArray[np.uint8]
+    customer2truck_selection: npt.NDArray[np.uint8]
+
+    def __init__(self, data: DumplingsDataBasic, x_np: npt.NDArray[np.uint8], y_np: npt.NDArray[np.uint8]):
+        self.dumplings_data = data
+        assert x_np.shape == (data.truck_possible_num, )
+        assert y_np.shape == (data.customer_num, data.truck_possible_num)
+        self.truck_selection = x_np
+        self.customer2truck_selection = y_np
+
+    def calc(self) -> np.float64:
+        I_num = self.dumplings_data.customer_num
+        J_num = self.dumplings_data.truck_possible_num
+        
+        x_np, y_np = self.x_np.astype(np.uint64), self.y_np.astype(np.uint64) # Prevent overflow
+
+        r, k, f= self.dumplings_data.r, self.dumplings_data.k, self.dumplings_data.f
+        alpha = self.dumplings_data.preference_matrix
+        d = self.dumplings_data.customer_demand
+        
+        res = 0
+        for i in range(I_num):
+            for j in range(J_num):
+                res += (r-k)*alpha[i, j]*d[i]*y_np[i, j]
+
+        for j in range(J_num):
+            res -= f*x_np[j]
+        return res
+
+    @staticmethod
+    def from_customer_choice(data: DumplingsDataBasic, demand_choice: npt.NDArray[np.uint64]):
+        assert demand_choice.shape == (data.customer_num, ), f"Invaild shape {demand_choice}!"
+        assert np.all(demand_choice < data.truck_possible_num), "Value should less than truck id!"
+        truck_id = np.unique(demand_choice)
+
+        I_num = data.customer_num
+        J_num = data.truck_possible_num
+
+        x_np = np.zeros(J_num, dtype=np.uint8)
+        y_np = np.zeros((I_num, J_num), dtype=np.uint8)
+
+        for x in truck_id:
+            x_np[x] = 1
+        for i, j in enumerate(demand_choice):
+            y_np[i, j] = 1
+        res_sol = DumplingSolutionBasic(data, x_np, y_np)
+        return res_sol
+    
+    def display_connection(self):
+        G = nx.DiGraph()
+
+        truck_selection, custom2truck_selection = self.truck_selection, self.customer2truck_selection
+        
+        assert np.sum(truck_selection)>0, 'There is no truck!'
+        
+        truck_nodes = [('T'+str(ind), {'type': 'T'}) for ind in range(self.dumplings_data.truck_possible_num)]
+        customer_nodes = [('C'+str(ind), {'type': 'C'}) for ind in range(self.dumplings_data.customer_num)]
+
+        G.add_nodes_from(truck_nodes + customer_nodes)
+        
+        correspond_truck_id = [np.where(row == 1)[0] for row in custom2truck_selection]
+
+        # Consider the situation that customer do not fully served(Like data in day 1).
+        customers_id: List[np.uint64] = []
+        trucks_id: List[np.uint64] = []
+        
+        for ind, x in enumerate(correspond_truck_id):
+            # assert x.size>0, f'Customter {ind} have not be served!'
+            if x.size>0:
+                customers_id.append(ind)
+                trucks_id.append(x[0])
+
+        edge_lst = [('C'+str(customer_id), 'T'+str(truck_id)) for customer_id, truck_id in zip(customers_id, trucks_id)]
+        G.add_edges_from(edge_lst)
+
+        G_no_isolates = G.copy()
+        G_no_isolates.remove_nodes_from(list(nx.isolates(G_no_isolates)))
+
+        color_map = {
+            "T": "gray",
+            "C": "skyblue",
+        }
+
+        node_colors = [color_map[G_no_isolates.nodes[node]["type"]] for node in G_no_isolates.nodes()]
+        
+        pos = nx.spring_layout(G_no_isolates, k=1, iterations=256, seed=42)
+        
+        nx.draw_networkx_nodes(G_no_isolates, pos, node_color=node_colors, node_shape='s', node_size=700, edgecolors='black')
+        nx.draw_networkx_edges(G_no_isolates, pos, width=1.5, alpha=0.7)
+        nx.draw_networkx_labels(G_no_isolates, pos)
