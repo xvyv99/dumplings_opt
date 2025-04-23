@@ -24,13 +24,19 @@ class DumplingsDataBasic:
         self.customer_num = customer_num
         self.truck_possible_num = truck_num
 
-        self.customer_demand = np.random.randint(20, 80, size=(self.customer_num))
-        self.preference_matrix = np.random.rand(self.customer_num, self.truck_possible_num)
+        self.customer_demand = self.generate_customer_demand()
+        self.preference_matrix = self.generate_preference_matrix()
         self.r = np.random.randint(3, 15)
         self.k = np.random.randint(3, 15)
         if self.r < self.k:
             self.r, self.k = self.k, self.r
         self.f = np.random.randint(100, 400)
+
+    def generate_customer_demand(self) -> npt.NDArray[np.float64]:
+        return np.random.randint(20, 80, size=(self.customer_num))
+
+    def generate_preference_matrix(self) -> npt.NDArray[np.float64]:
+        return np.random.rand(self.customer_num, self.truck_possible_num)
 
     def print_info(self):
         print("Dumplings Data Basic Information:")
@@ -67,7 +73,7 @@ class DumplingsDataBasic:
         return res
 
 class DumplingsMap(DumplingsDataBasic):
-    days: np.uint64 # Opt day count
+    timestep: np.uint64 # Opt day count
     te: np.uint64 # travel_expense
 
     customer_names: List[str]
@@ -76,37 +82,39 @@ class DumplingsMap(DumplingsDataBasic):
     truck_possible_location: npt.NDArray[np.float64]
     customer_location: npt.NDArray[np.float64]
 
+    def generate_customer_demand(self):
+        return np.random.randint(20, 80, size=(self.customer_num, self.timestep))
+
+    def generate_preference_matrix(self) -> npt.NDArray[np.float64]:
+        return np.random.rand(self.customer_num, self.truck_possible_num, self.timestep)
+
     def __init__(self, 
         customer_num: np.uint64, # TODO: variable customer number with constant customer possible number
         truck_num: np.uint64,
-        days: np.uint64 = 1,
+        timestep: np.uint64 = 1,
         travel_expense: np.uint64|None = None
     ):
+        self.timestep = timestep
         super().__init__(customer_num, truck_num)
-        self.days = days
         if not travel_expense:
             self.te = int(self.f / 2)
     
     @staticmethod
-    def generate_preference_matrix() -> npt.NDArray[np.float64]:
-        pass
-    
-    @staticmethod
-    def from_random(size: Tuple[np.uint64, np.uint64], customer_num: np.uint64, truck_num: np.uint64):
-        res_map = DumplingsMap(customer_num, truck_num)
+    def from_random(customer_num: np.uint64, truck_num: np.uint64, timestep: np.uint64 = 1, travel_expense: np.uint64|None = None, size: Tuple[np.uint64, np.uint64] = (10, 10)):
+        res_map = DumplingsMap(customer_num, truck_num, timestep, travel_expense)
         
         rng = np.random.default_rng()
         res_map.truck_possible_location = np.column_stack((
-            rng.uniform(0, size[0], size=res_map.dumplings_data.truck_possible_num),
-            rng.uniform(0, size[1], size=res_map.dumplings_data.truck_possible_num)
+            rng.uniform(0, size[0], size=res_map.truck_possible_num),
+            rng.uniform(0, size[1], size=res_map.truck_possible_num)
         ))
         res_map.customer_location = np.column_stack((
-            rng.uniform(0, size[0], size=res_map.dumplings_data.customer_num),
-            rng.uniform(0, size[1], size=res_map.dumplings_data.customer_num)
+            rng.uniform(0, size[0], size=res_map.customer_num),
+            rng.uniform(0, size[1], size=res_map.customer_num)
         ))
         
-        res_map.customer_names = ['C'+str(ind) for ind in range(res_map.dumplings_data.customer_num)]
-        res_map.truck_names = ['T'+str(ind) for ind in range(res_map.dumplings_data.truck_possible_num)]
+        res_map.customer_names = ['C'+str(ind) for ind in range(res_map.customer_num)]
+        res_map.truck_names = ['T'+str(ind) for ind in range(res_map.truck_possible_num)]
 
         return res_map
 
@@ -186,6 +194,107 @@ class DumplingsSolutionBasic:
 
         for j in range(J_num):
             res -= f*x_np[j]
+        return res
+
+    @staticmethod
+    def from_customer_choice(data: DumplingsDataBasic, demand_choice: npt.NDArray[np.uint64]):
+        assert demand_choice.shape == (data.customer_num, ), f"Invaild shape {demand_choice}!"
+        assert np.all(demand_choice < data.truck_possible_num), "Value should less than truck id!"
+        truck_id = np.unique(demand_choice)
+
+        I_num = data.customer_num
+        J_num = data.truck_possible_num
+
+        x_np = np.zeros(J_num, dtype=np.uint8)
+        y_np = np.zeros((I_num, J_num), dtype=np.uint8)
+
+        for x in truck_id:
+            x_np[x] = 1
+        for i, j in enumerate(demand_choice):
+            y_np[i, j] = 1
+        res_sol = DumplingsSolutionBasic(data, x_np, y_np)
+        return res_sol
+    
+    def display_connection(self):
+        G = nx.DiGraph()
+
+        truck_selection, custom2truck_selection = self.truck_selection, self.customer2truck_selection
+        
+        assert np.sum(truck_selection)>0, 'There is no truck!'
+        
+        truck_nodes = [('T'+str(ind), {'type': 'T'}) for ind in range(self.dumplings_data.truck_possible_num)]
+        customer_nodes = [('C'+str(ind), {'type': 'C'}) for ind in range(self.dumplings_data.customer_num)]
+
+        G.add_nodes_from(truck_nodes + customer_nodes)
+        
+        correspond_truck_id = [np.where(row == 1)[0] for row in custom2truck_selection]
+
+        # Consider the situation that customer do not fully served(Like data in day 1).
+        customers_id: List[np.uint64] = []
+        trucks_id: List[np.uint64] = []
+        
+        for ind, x in enumerate(correspond_truck_id):
+            # assert x.size>0, f'Customter {ind} have not be served!'
+            if x.size>0:
+                customers_id.append(ind)
+                trucks_id.append(x[0])
+
+        edge_lst = [('C'+str(customer_id), 'T'+str(truck_id)) for customer_id, truck_id in zip(customers_id, trucks_id)]
+        G.add_edges_from(edge_lst)
+
+        G_no_isolates = G.copy()
+        G_no_isolates.remove_nodes_from(list(nx.isolates(G_no_isolates)))
+
+        color_map = {
+            "T": "gray",
+            "C": "skyblue",
+        }
+
+        node_colors = [color_map[G_no_isolates.nodes[node]["type"]] for node in G_no_isolates.nodes()]
+        
+        # pos = nx.spring_layout(G_no_isolates, k=1, iterations=256, seed=42)
+        pos = nx.spring_layout(G_no_isolates, 
+            k=1.5,  
+            iterations=256, 
+            weight=None
+        )   
+
+        nx.draw_networkx_nodes(G_no_isolates, pos, node_color=node_colors, node_shape='s', node_size=700, edgecolors='black')
+        nx.draw_networkx_edges(G_no_isolates, pos, width=1.5, alpha=0.7)
+        nx.draw_networkx_labels(G_no_isolates, pos)
+
+class DumplingsSolutionAdv:
+    dumplings_data: DumplingsMap
+    truck_selection: npt.NDArray[np.uint8]
+    customer2truck_selection: npt.NDArray[np.uint8]
+
+    def __init__(self, data: DumplingsMap, x_np: npt.NDArray[np.uint8], y_np: npt.NDArray[np.uint8]):
+        self.dumplings_data = data
+        assert x_np.shape == (data.truck_possible_num, data.timestep)
+        assert y_np.shape == (data.customer_num, data.truck_possible_num, data.timestep)
+        self.truck_selection = x_np
+        self.customer2truck_selection = y_np
+
+    def calc(self) -> np.float64:
+        I_num = self.dumplings_data.customer_num
+        J_num = self.dumplings_data.truck_possible_num
+        K_num = self.dumplings_data.timestep
+        
+        x_np, y_np = self.x_np.astype(np.uint64), self.y_np.astype(np.uint64) # Prevent overflow
+
+        r, k, f= self.dumplings_data.r, self.dumplings_data.k, self.dumplings_data.f
+        alpha = self.dumplings_data.preference_matrix
+        d = self.dumplings_data.customer_demand
+        
+        res = 0
+        for K in range(K_num):
+            for i in range(I_num):
+                for j in range(J_num):
+                    res += (r-k)*alpha[i, j, K]*d[i, K]*y_np[i, j, K]
+
+        for K in range(K_num):
+            for j in range(J_num):
+                res -= f*x_np[j, K]
         return res
 
     @staticmethod
